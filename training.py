@@ -122,7 +122,7 @@ def play_game(start=True, debug=False):
             print("Winner: " + str(winner))
             first_player_won = int(start) if winner == 1 else int(not start)
             # Last few plays are reflected stronger
-            rewards = [max(1, (i-len(actions_taken)+6))*(winning_reward if (i+1) % 2 == first_player_won else losing_reward) for i in range(len(actions_taken))]
+            rewards = [max(1, (i-len(actions_taken)+max_positive_reward+1))*(winning_reward if (i+1) % 2 == first_player_won else losing_reward) for i in range(len(actions_taken))]
             break
 
     # Add experience to memory
