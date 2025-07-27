@@ -170,7 +170,7 @@ def train():
     global optimizer
     optimizer = optim.AdamW(model.parameters(), lr=LR, amsgrad=True)
 
-    for i in tqdm(range(10_000)):
+    for i in tqdm(range(50_000)):
         print("Iteration " + str(i))
         for j in range(10):
             start = np.random.binomial(size=1, n=1, p= 0.5)[0]
@@ -189,3 +189,4 @@ def train():
 
     print("Current state:")
     play_game(debug=True)
+    torch.save(model.state_dict(), r"./weights/confort.pt")
