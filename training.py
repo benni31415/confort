@@ -14,8 +14,8 @@ GAMMA = 0.99
 EPS_START = 0.9
 EPS_END = 0.05
 EPS_DECAY = 1000
-TAU = 0.005
-LR = 1e-4
+TAU = 0.0002
+LR = 5e-4
 
 model = None
 counterpart = None
@@ -78,6 +78,9 @@ def play_game(start=True, debug=False):
     losing_reward = -1
     rewards = []
 
+    # Last move rewards are multiplied by an ascending factor
+    max_positive_reward = 3
+
     # Make first move if protagonist (red; player 1) starts
     if start:
         action = select_action(state, debug=debug)
@@ -104,7 +107,7 @@ def play_game(start=True, debug=False):
             print("Winner: " + str(winner))
             first_player_won = int(start) if winner == 1 else int(not start)
             # Last few plays are reflected stronger
-            rewards = [max(1, (i-len(actions_taken)+4))*(winning_reward if (i+1) % 2 == first_player_won else losing_reward) for i in range(len(actions_taken))]
+            rewards = [max(1, (i-len(actions_taken)+max_positive_reward+1))*(winning_reward if (i+1) % 2 == first_player_won else losing_reward) for i in range(len(actions_taken))]
             break
 
         action = select_action(state, debug=debug)
@@ -123,16 +126,17 @@ def play_game(start=True, debug=False):
             break
 
     # Add experience to memory
-    # If last reward was negative, so a player kicked himself out, penalize with -1e5
-    if rewards[-1] == -3:
-        rewards[-1] = -1e5
-    for i in range(len(actions_taken)):
-        if debug:
-            print("New Memory")
-            print(state_history[i].vector.transpose()[::-1, :])
-            print(actions_taken[i])
-            print(rewards[i])
-        memory.push(state_history[i], actions_taken[i], rewards[i])
+    # If last reward was negative, so a player kicked himself out, penalize with -1e5 and ignore path to this ending
+    if rewards[-1] == -1 * max_positive_reward:
+        memory.push(state_history[-1], actions_taken[-1], -1e5)
+    else:
+        for i in range(len(actions_taken)):
+            if debug:
+                print("New Memory")
+                print(state_history[i].vector.transpose()[::-1, :])
+                print(actions_taken[i])
+                print(rewards[i])
+            memory.push(state_history[i], actions_taken[i], rewards[i])
 
 def adapt_counterpart():
     counterpart_state_dict = counterpart.state_dict()
@@ -149,12 +153,12 @@ def train():
     counterpart = DQNetwork()
 
     global memory
-    memory = ReplayMemory(capacity=100000)
+    memory = ReplayMemory(capacity=10000)
 
     global optimizer
     optimizer = optim.AdamW(model.parameters(), lr=LR, amsgrad=True)
 
-    for i in range(5000):
+    for i in range(500):
         print("Iteration " + str(i))
         for j in range(10):
             start = np.random.binomial(size=1, n=1, p= 0.5)[0]
@@ -162,3 +166,6 @@ def train():
 
             optimize_model()
             adapt_counterpart()
+
+    print("Current state:")
+    play_game(debug=True)
