@@ -4,16 +4,17 @@ import torch.optim as optim
 import random
 import math
 import numpy as np
+from copy import deepcopy
 from game_state import GameState
 from memory import ReplayMemory
 from model import DQNetwork
 
-BATCH_SIZE = 128
+BATCH_SIZE = 512
 GAMMA = 0.99
 EPS_START = 0.9
 EPS_END = 0.05
 EPS_DECAY = 1000
-TAU = 0.0001
+TAU = 0.005
 LR = 1e-4
 
 model = None
@@ -27,7 +28,7 @@ device = torch.device(
     "cpu"
 )
 
-def select_action(state):
+def select_action(state, debug=False):
     # https://pytorch.org/tutorials/intermediate/reinforcement_q_learning.html
     global steps_done
     sample = random.random()
@@ -37,7 +38,11 @@ def select_action(state):
     if sample > eps_threshold:
         #print("Using model to sample step")
         with torch.no_grad():
-            return model(torch.tensor(state.vector.flatten(), dtype=torch.float64)).max(-1).indices.view(1, 1)
+            output = model(torch.tensor(state.vector.reshape(1, 1, 8, 8), dtype=torch.float64))
+            if debug:
+                print("Predicted rewards:")
+                print(output)
+            return output.max(-1).indices.view(1, 1)
     else:
         #print("Using random option")
         return torch.tensor([[np.random.randint(8)]], device=device, dtype=torch.long)
@@ -45,19 +50,20 @@ def select_action(state):
 def determine_batch_loss(rewards, estimated_rewards, actions):
     index = torch.arange(0, BATCH_SIZE)
     # Combination of row index and action (output index) to consider
-    index2d = torch.stack([index, actions], axis=1)
-    return nn.MSELoss(estimated_rewards[index2d], rewards)
+    index2d = torch.stack([index, actions], axis=0)
+    loss_fn = nn.MSELoss()
+    return loss_fn(estimated_rewards[tuple(index2d)], rewards.double())
 
 def optimize_model():
     if len(memory) < BATCH_SIZE:
         return
     recordings = memory.sample(BATCH_SIZE)
 
-    state_vectors = torch.tensor([torch.tensor(recording.game_state.vector.flatten(), dtype=torch.float64) for recording in recordings])
+    state_vectors = torch.tensor([recording.game_state.vector.flatten() for recording in recordings], dtype=torch.float64)
     actions = torch.tensor([recording.action for recording in recordings])
     rewards = torch.tensor([recording.reward for recording in recordings])
 
-    estimated_rewards = model(state_vectors)
+    estimated_rewards = model(state_vectors.reshape(len(recordings), 1, 8, 8))
     loss = determine_batch_loss(rewards, estimated_rewards, actions)
     loss.backward()
     optimizer.step()
@@ -74,8 +80,8 @@ def play_game(start=True, debug=False):
 
     # Make first move if protagonist (red; player 1) starts
     if start:
-        action = select_action(state)
-        state_history.append(state)
+        action = select_action(state, debug=debug)
+        state_history.append(deepcopy(state))
         actions_taken.append(action)
         state = GameState(previous_state=state, index=action, red=True)
         if debug:
@@ -83,9 +89,11 @@ def play_game(start=True, debug=False):
 
 
     while True:
-        model_result = counterpart(torch.tensor(state.vector.flatten(), dtype=torch.float64))
+        # Flip entries to take view of counterpart
+        model_result = counterpart(-1 * torch.tensor(state.vector.reshape(1, 1, 8, 8), dtype=torch.float64))
         counterpart_action = model_result.max(-1).indices.view(1, 1)
-        state_history.append(state)
+        # Flip entries to take view of counterpart
+        state_history.append(deepcopy(state.invert()))
         actions_taken.append(counterpart_action)
         state = GameState(previous_state=state, index=counterpart_action, red=False)
         if debug:
@@ -95,12 +103,12 @@ def play_game(start=True, debug=False):
         if winner is not None:
             print("Winner: " + str(winner))
             first_player_won = int(start) if winner == 1 else int(not start)
-
-            rewards = [winning_reward if (i+1) % 2 == first_player_won else losing_reward for i in range(len(actions_taken))]
+            # Last few plays are reflected stronger
+            rewards = [max(1, (i-len(actions_taken)+4))*(winning_reward if (i+1) % 2 == first_player_won else losing_reward) for i in range(len(actions_taken))]
             break
 
-        action = select_action(state)
-        state_history.append(state)
+        action = select_action(state, debug=debug)
+        state_history.append(deepcopy(state))
         actions_taken.append(action)
         state = GameState(previous_state=state, index=action, red=True)
         if debug:
@@ -110,11 +118,20 @@ def play_game(start=True, debug=False):
         if winner is not None:
             print("Winner: " + str(winner))
             first_player_won = int(start) if winner == 1 else int(not start)
-            rewards = [winning_reward if (i+1) % 2 == first_player_won else losing_reward for i in range(len(actions_taken))]
+            # Last few plays are reflected stronger
+            rewards = [max(1, (i-len(actions_taken)+6))*(winning_reward if (i+1) % 2 == first_player_won else losing_reward) for i in range(len(actions_taken))]
             break
 
     # Add experience to memory
+    # If last reward was negative, so a player kicked himself out, penalize with -1e5
+    if rewards[-1] == -3:
+        rewards[-1] = -1e5
     for i in range(len(actions_taken)):
+        if debug:
+            print("New Memory")
+            print(state_history[i].vector.transpose()[::-1, :])
+            print(actions_taken[i])
+            print(rewards[i])
         memory.push(state_history[i], actions_taken[i], rewards[i])
 
 def adapt_counterpart():
@@ -132,16 +149,16 @@ def train():
     counterpart = DQNetwork()
 
     global memory
-    memory = ReplayMemory(capacity=100)
+    memory = ReplayMemory(capacity=100000)
 
     global optimizer
     optimizer = optim.AdamW(model.parameters(), lr=LR, amsgrad=True)
 
-    for i in range(100):
+    for i in range(5000):
         print("Iteration " + str(i))
         for j in range(10):
-            play_game(debug=False)
-            #memory.print()
-            optimize_model()
+            start = np.random.binomial(size=1, n=1, p= 0.5)[0]
+            play_game(start=start, debug=False)
 
+            optimize_model()
             adapt_counterpart()

@@ -17,11 +17,14 @@ class GameState:
                 col = np.concatenate([col[col != 0], [coin], np.zeros(8-col[col != 0].shape[0]-1)])
             # If illegal action is taken, i.e. coin inserted into full column, count game as lost
             except ValueError:
-                print("Illegal action taken")
-                self.vector = np.full((8, 8), 1-coin)
+                print("Illegal action taken by player " + str(coin) + ", column: " + str(index))
+                vec = np.full((8, 8), -coin)
 
             vec[index] = col
             self.vector = vec
+
+    def __str__(self):
+        return str(self.vector)
 
     def determine_winner(self):
         winning_streek = np.array([[1, 1, 1, 1]])
@@ -48,3 +51,8 @@ class GameState:
         if np.any(result == -4):
             return -1
         return None
+    
+    def invert(self):
+        inverted_state = GameState()
+        inverted_state.vector = -1 *self.vector
+        return inverted_state

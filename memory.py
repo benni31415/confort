@@ -1,5 +1,5 @@
 from collections import deque
-from random import random
+import random
 
 from recording import Recording
 

@@ -4,12 +4,13 @@ class DQNetwork(nn.Module):
 
     def __init__(self, n_observations=64, n_actions=8):
         super(DQNetwork, self).__init__()
-        self.layer1 = nn.Linear(n_observations, 128)
-        self.layer2 = nn.Linear(128, 128)
-        self.layer3 = nn.Linear(128, n_actions)
+        self.conv = nn.Conv2d(in_channels=1, out_channels=3, kernel_size=4)
+        # Convolution output: (8-3)x(8-3)x3
+        self.linear1 = nn.Linear(75, 128, bias=False)
+        self.linear2 = nn.Linear(128, n_actions, bias=False)
         self.double()
 
     def forward(self, x):
-        x = nn.functional.relu(self.layer1(x))
-        x = nn.functional.relu(self.layer2(x))
-        return self.layer3(x)
+        x = nn.functional.relu(self.conv(x))
+        x = self.linear1(x.reshape(x.shape[0], x.shape[1]*x.shape[2]*x.shape[3]))
+        return self.linear2(x)
