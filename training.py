@@ -6,14 +6,16 @@ import math
 import numpy as np
 from copy import deepcopy
 from game_state import GameState
+from illegal_action_breach_exception import IllegalActionBreachException
 from memory import ReplayMemory
 from model import DQNetwork
+from tqdm import tqdm
 
-BATCH_SIZE = 512
+BATCH_SIZE = 2048
 GAMMA = 0.99
 EPS_START = 0.9
 EPS_END = 0.05
-EPS_DECAY = 1000
+EPS_DECAY = 1e6
 TAU = 0.0002
 LR = 5e-4
 
@@ -57,7 +59,8 @@ def determine_batch_loss(rewards, estimated_rewards, actions):
 def optimize_model():
     if len(memory) < BATCH_SIZE:
         return
-    recordings = memory.sample(BATCH_SIZE)
+    # Reserve 10 % of batch size for the latest entries (to counter series of invalid actions)
+    recordings = memory.sample(BATCH_SIZE, BATCH_SIZE//10)
 
     state_vectors = torch.tensor([recording.game_state.vector.flatten() for recording in recordings], dtype=torch.float64)
     actions = torch.tensor([recording.action for recording in recordings])
@@ -67,6 +70,15 @@ def optimize_model():
     loss = determine_batch_loss(rewards, estimated_rewards, actions)
     loss.backward()
     optimizer.step()
+
+    illegal_actions = len([recordings[i] for i in range(BATCH_SIZE//10) if np.abs(recordings[i].reward) > 5])
+    if illegal_actions > BATCH_SIZE//20:
+        for i in range(BATCH_SIZE//10):
+            if np.abs(recordings[i].reward) > 5:
+                print(recordings[i].game_state)
+                print(recordings[i].action)
+                print(recordings[i].reward)
+        raise IllegalActionBreachException(illegal_actions, BATCH_SIZE//10, BATCH_SIZE//20)
 
 def play_game(start=True, debug=False):
     state = GameState()
@@ -126,7 +138,7 @@ def play_game(start=True, debug=False):
             break
 
     # Add experience to memory
-    # If last reward was negative, so a player kicked himself out, penalize with -1e5 and ignore path to this ending
+    # If last reward was negative, so a player kicked itself out, penalize with -1e5 and ignore path to this ending
     if rewards[-1] == -1 * max_positive_reward:
         memory.push(state_history[-1], actions_taken[-1], -1e5)
     else:
@@ -153,19 +165,27 @@ def train():
     counterpart = DQNetwork()
 
     global memory
-    memory = ReplayMemory(capacity=10000)
+    memory = ReplayMemory(capacity=100_000)
 
     global optimizer
     optimizer = optim.AdamW(model.parameters(), lr=LR, amsgrad=True)
 
-    for i in range(500):
+    for i in tqdm(range(10_000)):
         print("Iteration " + str(i))
         for j in range(10):
             start = np.random.binomial(size=1, n=1, p= 0.5)[0]
             play_game(start=start, debug=False)
 
+        try:
             optimize_model()
-            adapt_counterpart()
+        except IllegalActionBreachException as e:
+            print(e.message)
+            global steps_done
+            steps_done_new = steps_done // 2
+            print(f"Adapting step counter to half: {steps_done} -> {steps_done_new}")
+            steps_done = steps_done_new
+
+        adapt_counterpart()
 
     print("Current state:")
     play_game(debug=True)

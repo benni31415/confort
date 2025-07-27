@@ -24,7 +24,7 @@ class GameState:
             self.vector = vec
 
     def __str__(self):
-        return str(self.vector)
+        return str(self.vector.transpose()[::-1, :])
 
     def determine_winner(self):
         winning_streek = np.array([[1, 1, 1, 1]])

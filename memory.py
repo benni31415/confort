@@ -13,8 +13,8 @@ class ReplayMemory(object):
         """Save a transition"""
         self.memory.append(Recording(*args))
 
-    def sample(self, batch_size):
-        return random.sample(self.memory, batch_size)
+    def sample(self, batch_size, last_n=0):
+        return list(self.memory)[-last_n:] + random.sample(self.memory, batch_size-last_n)
 
     def __len__(self):
         return len(self.memory)
